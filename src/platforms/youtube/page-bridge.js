@@ -59,6 +59,26 @@
         player?.setOption?.("captions", "reload", true);
       } catch (error) { send({ type: "error", code: "TRACK_FETCH_FAILED", message: String(error) }); }
     }
+    if (event.data.type === "snapshotNativeTrack") {
+      try {
+        const player = document.getElementById("movie_player");
+        const track = player?.getOption?.("captions", "track") ?? null;
+        send({ type: "nativeTrackSnapshot", requestId: event.data.requestId, ok: true, track });
+      } catch (error) {
+        send({ type: "nativeTrackSnapshot", requestId: event.data.requestId, ok: false, message: String(error?.message || error) });
+      }
+    }
+    if (event.data.type === "restoreNativeTrack") {
+      try {
+        const player = document.getElementById("movie_player");
+        if (!player?.setOption) throw new Error("YouTube player caption options are unavailable.");
+        player.setOption("captions", "track", event.data.track ?? null);
+        player.setOption("captions", "reload", true);
+        send({ type: "nativeTrackRestored", requestId: event.data.requestId, ok: true, track: event.data.track ?? null });
+      } catch (error) {
+        send({ type: "nativeTrackRestored", requestId: event.data.requestId, ok: false, message: String(error?.message || error) });
+      }
+    }
   });
   const observer = new MutationObserver(() => { if (!latest) inspect(); });
   observer.observe(document.documentElement, { childList: true, subtree: true });

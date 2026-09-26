@@ -4,6 +4,7 @@
       this.tracks = [];
       this.responses = new Map();
       this.pending = new Map();
+      this.bridgeRequests = new Map();
       this.destroyed = false;
       this.messageHandler = (event) => {
         if (event.source !== window || !event.data || event.data.source !== "DUALSUB_YT") return;
@@ -18,6 +19,13 @@
           this.responses.set(track.id, cues);
           const resolve = this.pending.get(track.id);
           if (resolve) { clearTimeout(resolve.timer); resolve.resolve(cues); this.pending.delete(track.id); }
+        } else if (message.type === "nativeTrackSnapshot" || message.type === "nativeTrackRestored") {
+          const pending = this.bridgeRequests.get(message.requestId);
+          if (!pending) return;
+          clearTimeout(pending.timer);
+          this.bridgeRequests.delete(message.requestId);
+          if (message.ok === false) pending.reject(new Error(message.message || "YouTube native caption track operation failed."));
+          else pending.resolve(message.track ?? null);
         }
       };
       window.addEventListener("message", this.messageHandler);
@@ -47,6 +55,27 @@
       if (!track) throw new Error("TRACK_FETCH_FAILED: unknown track");
       this.post({ type: "selectTrack", track: track.native });
     }
+    async requestBridge(type, track = undefined) {
+      const requestId = `yt-${type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const response = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.bridgeRequests.delete(requestId);
+          reject(new Error(`PLAYER_NOT_READY: YouTube bridge did not respond to ${type}.`));
+        }, 1200);
+        this.bridgeRequests.set(requestId, { resolve, reject, timer });
+      });
+      this.post({ type, requestId, ...(track !== undefined ? { track } : {}) });
+      return response;
+    }
+    async snapshotNativeTrack() { return this.requestBridge("snapshotNativeTrack"); }
+    async restoreNativeTrack(track) { return this.requestBridge("restoreNativeTrack", track); }
+    getCachedCues(trackId) { return this.responses.get(trackId) || []; }
+    async acquireCuesForExport(trackId) {
+      const cached = this.getCachedCues(trackId);
+      if (cached.length) return cached;
+      await this.selectTrack(trackId);
+      return this.getCues(trackId);
+    }
     async getCues(trackId) {
       if (this.responses.has(trackId)) return this.responses.get(trackId);
       return new Promise((resolve, reject) => {
@@ -63,6 +92,11 @@
         clearTimeout(pending.timer);
         pending.reject(new Error("PLAYER_NOT_READY: YouTube adapter was disposed."));
         this.pending.delete(trackId);
+      }
+      for (const [requestId, pending] of this.bridgeRequests) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("PLAYER_NOT_READY: YouTube adapter was disposed."));
+        this.bridgeRequests.delete(requestId);
       }
       this.tracks = [];
       this.responses.clear();

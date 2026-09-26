@@ -80,4 +80,14 @@ button:hover:not(:disabled) { background: #5547bf; }
 button:disabled { opacity: 0.55; cursor: default; }
 .message { min-height: 18px; margin: 10px 0 4px; color: GrayText; font-size: 11px; }
 .message.error { color: #d24747; }
+.export-section { margin-top: 15px; padding-top: 13px; border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent); }
+.export-section h2 { margin: 0; font-size: 14px; }
+.export-help { margin: 3px 0 9px; color: GrayText; font-size: 11px; }
+.export-tracks { display: grid; gap: 5px; max-height: 150px; overflow: auto; margin-bottom: 8px; }
+.export-track { display: flex; align-items: flex-start; gap: 8px; font-weight: 400; overflow-wrap: anywhere; }
+.export-track input { flex: 0 0 auto; margin: 2px 0 0; accent-color: #6658d3; }
+.export-section button + button { margin-top: 7px; }
+.export-status { min-height: 15px; margin: 6px 0 0; color: GrayText; font-size: 11px; }
+.export-status.error { color: #d24747; }
+[hidden] { display: none !important; }
 footer { border-top: 1px solid color-mix(in srgb, CanvasText 14%, transparent); padding-top: 11px; color: GrayText; font-size: 11px; }

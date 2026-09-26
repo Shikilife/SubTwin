@@ -19,6 +19,7 @@
   let activeSettings = normalize(defaults);
   let lastInitError = null;
   let lastNetflixDiagnostics = null;
+  let exportJob = null;
   let initializing = false;
   let generation = 0;
   let nextInitAttemptAt = 0;
@@ -259,6 +260,98 @@
     return publicStatus();
   }
 
+  function getExportStatus(jobId = null) {
+    if (!exportJob || (jobId && exportJob.id !== jobId)) return null;
+    return { ...exportJob, failedTracks: exportJob.failedTracks.map((track) => ({ ...track })) };
+  }
+
+  function getCachedTrackCues(adapter, trackId) {
+    const adapterCues = adapter.getCachedCues?.(trackId);
+    if (Array.isArray(adapterCues) && adapterCues.length) return adapterCues;
+    const engineCues = engine?.cues.get(trackId);
+    return Array.isArray(engineCues) ? engineCues : [];
+  }
+
+  function startExport(trackIds) {
+    if (!engine) throw new Error("PLAYER_NOT_READY: subtitle tracks are still initializing.");
+    if (!Array.isArray(trackIds) || trackIds.length < 1 || trackIds.length > 50) throw new Error("Select between 1 and 50 subtitle tracks to export.");
+    if (trackIds.some((id) => typeof id !== "string" || id.length > 256) || new Set(trackIds).size !== trackIds.length) {
+      throw new Error("Invalid subtitle track selection.");
+    }
+    const adapter = engine.adapter;
+    const selected = trackIds.map((id) => engine.tracks.find((track) => track.id === id));
+    if (selected.some((track) => !track)) throw new Error("A selected subtitle track is no longer available on this video.");
+    if (exportJob?.state === "preparing") throw new Error("An export is already being prepared for this playback session.");
+    exportJob = {
+      id: `export-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      state: "preparing",
+      total: selected.length,
+      completed: 0,
+      exportedTrackLabels: [],
+      failedTracks: [],
+      markdown: null,
+      filename: null
+    };
+    const job = exportJob;
+    void runExport(job, adapter, selected);
+    return { jobId: job.id, state: job.state, total: job.total };
+  }
+
+  async function runExport(job, adapter, selected) {
+    const exportedTracks = [];
+    const needsAcquisition = selected.some((track) => !getCachedTrackCues(adapter, track.id).length);
+    let youtubeNativeSnapshot;
+    let youtubeSnapshotTaken = false;
+    try {
+      if (platform === "YouTube" && needsAcquisition && typeof adapter.snapshotNativeTrack === "function") {
+        try {
+          youtubeNativeSnapshot = await adapter.snapshotNativeTrack();
+          youtubeSnapshotTaken = true;
+        } catch (error) {
+          logger.warn("Could not snapshot YouTube's native subtitle selection before export.", error);
+        }
+      }
+      for (const track of selected) {
+        if (engine?.adapter !== adapter) throw new Error("PLAYER_NOT_READY: playback changed during export.");
+        try {
+          let cues = getCachedTrackCues(adapter, track.id);
+          if (!cues.length) {
+            if (typeof adapter.acquireCuesForExport !== "function") throw new Error("TRACK_FETCH_FAILED: this platform adapter cannot acquire a complete cue list.");
+            cues = await adapter.acquireCuesForExport(track.id);
+          }
+          if (engine?.adapter !== adapter) throw new Error("PLAYER_NOT_READY: playback changed during export.");
+          if (!Array.isArray(cues) || !cues.length) throw new Error("TRACK_FETCH_FAILED: no subtitle cues were available for this track.");
+          engine?.cues.set(track.id, cues);
+          exportedTracks.push({ id: track.id, language: track.language, label: track.label, cues });
+          job.exportedTrackLabels.push(track.label || track.language || track.id);
+        } catch (error) {
+          job.failedTracks.push({ id: track.id, label: track.label || track.language || track.id, error: String(error?.message || error) });
+        }
+        job.completed++;
+      }
+      if (exportedTracks.length) {
+        const title = String(document.title || "Subtitles").replace(/\s*[-|·]\s*(YouTube|Netflix)\s*$/i, "").trim() || "Subtitles";
+        job.markdown = DualSubtitle.subtitleExporter.createMarkdown({ title, tracks: exportedTracks, failedTracks: job.failedTracks });
+        job.filename = DualSubtitle.subtitleExporter.sanitizeFilename(title);
+        job.state = "complete";
+      } else {
+        job.state = "failed";
+      }
+    } catch (error) {
+      job.state = "failed";
+      job.failedTracks.push({ id: "", label: "Export", error: String(error?.message || error) });
+    } finally {
+      if (platform === "YouTube" && needsAcquisition && engine?.adapter === adapter) {
+        try {
+          if (youtubeSnapshotTaken) await adapter.restoreNativeTrack(youtubeNativeSnapshot);
+          else if (engine?.adapter === adapter && engine.primaryId) await adapter.selectTrack(engine.primaryId);
+        } catch (error) {
+          logger.warn("Could not restore YouTube's native subtitle selection after export.", error);
+        }
+      }
+    }
+  }
+
   async function handlePopupCommand(message) {
     if (platform === "YouTube" && ["GET_STATUS", "LIST_TRACKS"].includes(message.type)) {
       void ensureYouTubeReady(`popup:${message.type.toLowerCase()}`);
@@ -271,6 +364,10 @@
       case "LIST_TRACKS":
         if (!engine) throw new Error("PLAYER_NOT_READY: subtitle tracks are still initializing.");
         return engine.tracks.map((track, index) => ({ index, ...publicTrack(track) }));
+      case "EXPORT_SUBTITLES":
+        return startExport(message.trackIds);
+      case "GET_EXPORT_STATUS":
+        return getExportStatus(message.jobId || null);
       case "SELECT_TRACKS": {
         if (!engine) throw new Error("PLAYER_NOT_READY: subtitle tracks are still initializing.");
         const args = message.args;
@@ -315,7 +412,7 @@
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender.id !== chrome.runtime.id || message?.namespace !== "SUBTWIN_POPUP" || typeof message.type !== "string") return false;
-    const allowed = new Set(["GET_STATUS", "LIST_TRACKS", "SELECT_TRACKS", "ENABLE", "DISABLE", "PREVIEW_SETTINGS", "SAVE_SETTINGS", "UPDATE_SETTINGS"]);
+    const allowed = new Set(["GET_STATUS", "LIST_TRACKS", "SELECT_TRACKS", "ENABLE", "DISABLE", "PREVIEW_SETTINGS", "SAVE_SETTINGS", "UPDATE_SETTINGS", "EXPORT_SUBTITLES", "GET_EXPORT_STATUS"]);
     if (!allowed.has(message.type)) return false;
     Promise.resolve(handlePopupCommand(message)).then(
       (result) => sendResponse({ ok: true, result }),
@@ -622,6 +719,7 @@
     } else {
       generation++;
       initializing = false;
+      exportJob = null;
       if (platform === "Netflix") {
         activeSettings = normalize({ ...activeSettings, primaryTrackId: null, secondaryTrackId: null });
       }

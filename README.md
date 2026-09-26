@@ -9,6 +9,12 @@ A local-first dual subtitle browser extension for YouTube and Netflix. It reads 
 3. Open a YouTube or Netflix title with text subtitle tracks.
 4. Open SubTwin from the Chrome toolbar, choose Primary and Secondary tracks, adjust each size and Y position plus max width, enable SubTwin, and press **Apply**.
 
+## Subtitle Export
+
+Use **Export Subtitles** in the Popup to select one or more tracks from the current YouTube video or Netflix episode and save them as a Markdown file. The track list is populated dynamically, and each selected track gets its own section with cue timestamps. Netflix variants such as English and English [CC] remain separate choices.
+
+Export is an explicit user-triggered local action. It includes only cues supplied by the active platform; it does not translate, generate, infer, OCR, or upload subtitle content, and makes no external request. Cue acquisition and the temporary Markdown result remain in page memory while the export is prepared; they are not saved to extension storage. If some selected tracks are unavailable, successful tracks can still be downloaded and the unavailable tracks are listed in the document. Closing the Popup does not cancel preparation; reopen it to retrieve the ready file.
+
 Track menus are populated from the active page's adapter at runtime. YouTube track IDs and language preferences are saved locally. Netflix keeps exact track IDs only for the active playback session and persists language plus a metadata-derived variant preference when available. YouTube may use its existing first-track fallback when a preference is unavailable; Netflix leaves an ambiguous or unavailable language unset instead of picking an unrelated track.
 
 On Netflix, a current-session track ID is matched exactly first, then persisted language and variant preference are used to locate the corresponding track in a new episode. If the preferred language is missing or its variants cannot be safely disambiguated, SubTwin leaves that line unavailable instead of selecting an unrelated track. The Popup displays an unavailable placeholder until the user chooses a track.
@@ -36,6 +42,8 @@ manifest.json
 README.md
 src/
 ├─ content.js
+├─ export/
+│  └─ subtitle-exporter.js
 ├─ core/
 │  ├─ subtitle-types.js
 │  ├─ subtitle-engine.js
@@ -65,14 +73,15 @@ src/
 tests/
 ├─ subtitle-parser.html
 ├─ subtitle-parser.js
+├─ subtitle-exporter.js
 └─ settings-persistence.js
 ```
 
 ## Popup and messaging
 
-The popup gets the active tab ID and sends allowlisted `GET_STATUS`, `LIST_TRACKS`, `PREVIEW_SETTINGS`, and `SAVE_SETTINGS` messages to that tab's content script. Range input events are coalesced with `requestAnimationFrame`; previews update only the in-memory `activeSettings` and renderer. They never write `chrome.storage.local`. **Apply** sends the complete settings as `SAVE_SETTINGS`, which updates both `activeSettings` and `savedSettings` and writes once to local storage. Closing the popup leaves the page's active preview in place. Reopening the popup reads `activeSettings` from the content script; a page or extension reload initializes from the last saved settings. Chrome permits basic `tabs.query()` and `tabs.sendMessage()` without the broad `tabs` permission; this PoC does not read tab URL/title. [Chrome Tabs API permissions](https://developer.chrome.com/docs/extensions/reference/api/tabs), [Chrome permission troubleshooting](https://developer.chrome.com/docs/webstore/troubleshooting).
+The popup gets the active tab ID and sends allowlisted `GET_STATUS`, `LIST_TRACKS`, `PREVIEW_SETTINGS`, `SAVE_SETTINGS`, `EXPORT_SUBTITLES`, and `GET_EXPORT_STATUS` messages to that tab's content script. Range input events are coalesced with `requestAnimationFrame`; previews update only the in-memory `activeSettings` and renderer. They never write `chrome.storage.local`. **Apply** sends the complete settings as `SAVE_SETTINGS`, which updates both `activeSettings` and `savedSettings` and writes once to local storage. Export runs as a page-memory job in the content script; the Popup polls its status and creates a local Markdown Blob download when ready. Closing the popup does not cancel preparation. Reopening the popup can retrieve the ready file. Reopening the Popup for normal settings reads `activeSettings` from the content script; a page or extension reload initializes from the last saved settings. Chrome permits basic `tabs.query()` and `tabs.sendMessage()` without the broad `tabs` permission; the Popup uses the tab ID only to message the active content script, and reads the page title only when the user explicitly starts export. [Chrome Tabs API permissions](https://developer.chrome.com/docs/extensions/reference/api/tabs), [Chrome permission troubleshooting](https://developer.chrome.com/docs/webstore/troubleshooting).
 
-Content script commands are allowlisted and validate selected track IDs. Settings use `chrome.storage.local` and contain only enabled state, language and metadata-derived Netflix variant preferences, font scales, independent Y positions, and maximum subtitle width. Netflix track IDs remain in active page memory and are cleared from persisted settings; across titles the extension rematches language plus a variant fingerprint when metadata supports one. Subtitle cues and intercepted response text are held only in bounded page memory for the current Netflix playback session; they are never written to persistent storage. Video URLs/titles and viewing history are not stored.
+Content script commands are allowlisted and validate selected track IDs. Settings use `chrome.storage.local` and contain only enabled state, language and metadata-derived Netflix variant preferences, font scales, independent Y positions, and maximum subtitle width. Netflix track IDs remain in active page memory and are cleared from persisted settings; across titles the extension rematches language plus a variant fingerprint when metadata supports one. Subtitle cues and intercepted response text are held only in bounded page memory for the current Netflix playback session; they are never written to persistent storage. Export temporarily holds the user-selected cues, page title, and Markdown result in current page memory only, then discards them on navigation/session reset. The title is not persisted. No viewing history is stored.
 
 The MAIN-world `window.dualSubtitle` object is a thin Promise-based debug bridge. It forwards only `GET_STATUS`, `LIST_TRACKS`, and `SELECT_TRACKS`; subtitle logic remains in the isolated content script.
 
@@ -120,10 +129,13 @@ The previous YouTube PoC's dual-cue acquisition was reported as PASS in the user
 | Netflix cue acquisition | PASS (user-reported live results) | In the latest title, zh-Hant produced 444 cues; English ASSISTIVE/CLOSEDCAPTIONS produced 510 and English PRIMARY/SUBTITLES produced 437. Both candidates passed selection, request, response and parse. |
 | Netflix variant labels and preference | PARTIAL | Metadata-based `[CC]` labeling, PRIMARY-first language fallback, variant fingerprint persistence and Popup disambiguation are implemented and statically checked; verify in a live Netflix Popup. |
 | Netflix overlay, Popup and lifecycle | PARTIAL | Netflix session reinitialization, container reattach, and native-caption controller remain unverified in live playback. |
+| Markdown subtitle export | STATIC PASS | Dynamic track-ID selection, cache-first acquisition paths, per-track Markdown sections, partial-failure reporting, local Blob download, and pure formatting tests are implemented; live export remains untested. |
 
 `tests/subtitle-parser.html` is a dependency-free browser harness for namespace-prefixed TTML/DFXP, WebVTT, and YouTube JSON3 parsing. Open it locally in a browser to run those format checks. It does not establish which format Netflix currently serves.
 
 Run `node tests/settings-persistence.js` to check the platform-specific storage contract: YouTube exact track IDs are retained, Netflix exact IDs are omitted, Netflix language/variant preferences are retained, and legacy Netflix IDs are ignored during restoration. This does not exercise Chrome `storage.local` or live Netflix rematching.
+
+Run `node tests/subtitle-exporter.js` to check single/multiple track sections, multiline and CC text preservation, empty cue filtering, timestamp formatting, and filename sanitization. `node --check src/content.js`, `node --check src/popup/popup.js`, `node --check src/export/subtitle-exporter.js`, and Manifest JSON/permission checks provide static validation only; they do not replace a live browser export.
 
 Netflix uses a MAIN-world bridge injected at `document_start` to probe the current player session and its timed-text track metadata. It observes page `fetch`/XHR subtitle responses and keeps matching response bodies in a bounded, in-memory, session-scoped cache (8 MiB, 64 entries, up to 12 per track). No subtitle text is written to storage or sent off-device. The isolated adapter can query this cache after it initializes, so a response captured before adapter startup is not lost. Request attribution snapshots the native selected track at request time, or the SubTwin-requested track for an internal acquisition. On a session change the raw-response cache and parsed cue cache are cleared.
 

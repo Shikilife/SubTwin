@@ -12,6 +12,10 @@
   const apply = document.getElementById("apply");
   const message = document.getElementById("message");
   const connection = document.getElementById("connection");
+  const exportTracks = document.getElementById("export-tracks");
+  const exportButton = document.getElementById("export-button");
+  const downloadExport = document.getElementById("download-export");
+  const exportStatus = document.getElementById("export-status");
   let tabId = null;
   let tracks = [];
   let saved = defaults;
@@ -19,6 +23,8 @@
   let connected = false;
   let isNetflix = false;
   let previewFrame = 0;
+  let activeExportJobId = null;
+  let exportPollTimer = null;
   const ranges = [primarySize, secondarySize, primaryY, secondaryY, maxWidth, backgroundOpacity];
   for (const range of ranges) range.disabled = true;
 
@@ -125,6 +131,78 @@
     apply.disabled = !connected;
   }
 
+  function renderExportTracks() {
+    exportTracks.replaceChildren();
+    for (const track of tracks) {
+      const label = document.createElement("label");
+      label.className = "export-track";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = track.id;
+      checkbox.addEventListener("change", updateExportButton);
+      const text = document.createElement("span");
+      text.textContent = optionLabel(track);
+      label.append(checkbox, text);
+      exportTracks.append(label);
+    }
+    updateExportButton();
+  }
+
+  function updateExportButton() {
+    const selectedCount = exportTracks.querySelectorAll('input[type="checkbox"]:checked').length;
+    exportButton.disabled = !connected || selectedCount === 0 || activeExportJobId != null;
+  }
+
+  function showExportStatus(status) {
+    if (!status) return;
+    activeExportJobId = status.state === "preparing" ? status.id : null;
+    downloadExport.hidden = status.state !== "complete" || !status.markdown;
+    if (status.state === "preparing") {
+      exportStatus.textContent = `Preparing subtitles… ${status.completed}/${status.total}`;
+      exportStatus.classList.remove("error");
+      updateExportButton();
+      if (exportPollTimer) clearTimeout(exportPollTimer);
+      exportPollTimer = setTimeout(() => void pollExport(status.id), 500);
+      return;
+    }
+    if (status.state === "failed") {
+      exportStatus.textContent = status.failedTracks?.map((track) => track.error).filter(Boolean).join("; ") || "No selected tracks could be exported.";
+      exportStatus.classList.add("error");
+      updateExportButton();
+      return;
+    }
+    const succeeded = status.exportedTrackLabels?.length || 0;
+    const failed = status.failedTracks?.length || 0;
+    exportStatus.textContent = failed
+      ? `Ready: ${succeeded} / ${status.total} tracks. ${failed} track${failed === 1 ? "" : "s"} unavailable.`
+      : `Ready to save ${succeeded} track${succeeded === 1 ? "" : "s"} as Markdown.`;
+    exportStatus.classList.remove("error");
+    updateExportButton();
+  }
+
+  async function pollExport(jobId) {
+    try {
+      const status = await send("GET_EXPORT_STATUS", { jobId });
+      showExportStatus(status);
+    } catch (error) {
+      exportStatus.textContent = error.message || "Export status is unavailable.";
+      exportStatus.classList.add("error");
+      activeExportJobId = null;
+      updateExportButton();
+    }
+  }
+
+  function downloadMarkdown(status) {
+    if (!status?.markdown || !status.filename) return;
+    const blob = new Blob([status.markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = status.filename;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   async function initialize() {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -165,8 +243,11 @@
       connected = true;
       for (const range of ranges) range.disabled = false;
       updateTrackMenus();
+      renderExportTracks();
       connection.textContent = `${status.platform[0].toUpperCase()}${status.platform.slice(1)} • Connected`;
       say(tracks.length ? `${tracks.length} subtitle track${tracks.length === 1 ? "" : "s"} available.` : "No subtitle tracks on this video. SubTwin is available to disable.");
+      const previousExport = await send("GET_EXPORT_STATUS").catch(() => null);
+      if (previousExport) showExportStatus(previousExport);
     } catch (error) {
       primary.disabled = secondary.disabled = apply.disabled = true;
       connection.textContent = isNetflix ? "Netflix • Waiting for player" : "Player not connected";
@@ -239,6 +320,41 @@
     } catch (error) {
       say(error.message || String(error), true);
     } finally { apply.disabled = !connected; }
+  });
+
+  exportButton.addEventListener("click", async () => {
+    const trackIds = [...exportTracks.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+    if (!trackIds.length) return;
+    exportButton.disabled = true;
+    downloadExport.hidden = true;
+    exportStatus.classList.remove("error");
+    exportStatus.textContent = "Preparing subtitles…";
+    try {
+      const started = await send("EXPORT_SUBTITLES", { trackIds });
+      activeExportJobId = started.jobId;
+      showExportStatus(await send("GET_EXPORT_STATUS", { jobId: started.jobId }));
+    } catch (error) {
+      exportStatus.textContent = error.message || String(error);
+      exportStatus.classList.add("error");
+      activeExportJobId = null;
+      updateExportButton();
+    }
+  });
+
+  downloadExport.addEventListener("click", async () => {
+    try {
+      const status = await send("GET_EXPORT_STATUS", { jobId: activeExportJobId || undefined });
+      if (!status?.markdown) throw new Error("The prepared Markdown export is no longer available.");
+      downloadMarkdown(status);
+      const succeeded = status.exportedTrackLabels?.length || 0;
+      const failed = status.failedTracks?.length || 0;
+      exportStatus.textContent = failed
+        ? `Downloaded ${succeeded} / ${status.total} tracks. ${failed} track${failed === 1 ? "" : "s"} unavailable.`
+        : `Downloaded ${succeeded} track${succeeded === 1 ? "" : "s"}.`;
+    } catch (error) {
+      exportStatus.textContent = error.message || String(error);
+      exportStatus.classList.add("error");
+    }
   });
 
   initialize();

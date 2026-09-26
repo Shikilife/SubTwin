@@ -62,6 +62,14 @@
     </label>
 
     <button id="apply" type="button" disabled>Apply</button>
+    <section class="export-section" aria-labelledby="export-heading">
+      <h2 id="export-heading">Export Subtitles</h2>
+      <p class="export-help">Choose one or more tracks to save as a local Markdown file.</p>
+      <div id="export-tracks" class="export-tracks" aria-label="Subtitle tracks to export"></div>
+      <button id="export-button" type="button" disabled>Prepare Markdown</button>
+      <button id="download-export" type="button" hidden>Save Markdown file</button>
+      <p id="export-status" class="export-status" role="status" aria-live="polite"></p>
+    </section>
     <p id="message" class="message" role="status" aria-live="polite">Connecting…</p>
     <footer id="connection">Player status unavailable</footer>
   </main>

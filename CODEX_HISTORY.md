@@ -5,7 +5,8 @@ Last audited: 2026-09-26. Earlier implementation dates were not recorded in the 
 ## Project Rules
 
 - Local-first: subtitle data is processed in the browser; no SubTwin backend.
-- Do not add translation, AI, OCR, speech recognition, export, telemetry, analytics, login, or external subtitle services.
+- Subtitle export is allowed only as an explicit user-triggered local action. Export only subtitle tracks/cues already supplied by the active platform. Do not translate, generate, infer, OCR, or upload subtitle content.
+- Do not add telemetry, analytics, login, or external subtitle services.
 - Read only subtitle tracks and cues offered by the platform. Never invent a second track when a title has only one.
 - Keep permissions minimal. Current manifest permission is `storage`; supported page matches are YouTube and Netflix.
 - Keep the shared core platform-neutral. YouTube and Netflix player APIs, caption suppression, and lifecycle handling belong in their platform folders.
@@ -25,6 +26,7 @@ Last audited: 2026-09-26. Earlier implementation dates were not recorded in the 
 - `src/core/settings.js` also owns a platform-aware storage contract: YouTube track IDs may persist; Netflix persists only language and variant fingerprints. Netflix exact IDs remain in the current content-script runtime.
 - `src/renderer/`: one platform-neutral renderer. The adapter supplies its player container. Each cue line is independently positioned; text and background are wrapped separately.
 - `src/popup/`: dynamic track choices are requested from the active tab's content script. Visual range input sends `PREVIEW_SETTINGS`; `SAVE_SETTINGS` / Apply persists the complete settings object.
+- `src/export/subtitle-exporter.js`: formats already-acquired normalized cues into a local Markdown file; Popup export acquisition runs in the content script and keeps its job/result in page memory only.
 - `src/content.js`: exact-host routing, popup/debug command allowlist, platform settings storage, and the selected adapter's lifecycle.
 
 ### YouTube
@@ -180,6 +182,22 @@ Validation: Code path is documented and locally statically checked in README; co
 
 Remaining risk: Keep visual preview fields within the normalizer and avoid persisting subtitle content.
 
+### 2026-09-26 — Local Markdown subtitle export added
+
+Problem / Request: Allow users to explicitly export one or more platform-provided subtitle tracks from the current YouTube video or Netflix episode as Markdown.
+
+Decision: Add a shared formatter and dynamic track checkboxes keyed by exact track IDs. Run cue acquisition as a content-script job so Popup closure does not cancel it; reuse adapter cue caches first, acquire only missing tracks, preserve partial successes, and let the Popup download the completed Markdown using a local Blob and anchor. YouTube attempts to snapshot and restore its native caption selection around uncached acquisition; Netflix uses its existing cache-first `selectTracks()` path and native-track restoration.
+
+Architecture: Adapter methods supply complete normalized cues; `src/export/subtitle-exporter.js` owns per-track Markdown sections, timestamps, and filename sanitization. Job state, title, cues, and generated Markdown remain in current page memory and are cleared on playback route/session reset. Only the user's explicit Popup action starts export. No additional permissions or network calls were added.
+
+Privacy boundary: Exports include only cues already exposed by the active platform. No translation, generation, inference, OCR, upload, persistent title/history, or cue storage is used.
+
+Files: `src/export/subtitle-exporter.js`, `src/platforms/youtube/youtube-adapter.js`, `src/platforms/youtube/page-bridge.js`, `src/platforms/netflix/netflix-adapter.js`, `src/content.js`, `src/popup/`, `manifest.json`, `tests/subtitle-exporter.js`, README, and this history.
+
+Validation: `node tests/subtitle-exporter.js`, `node tests/settings-persistence.js`, JavaScript syntax checks, and Manifest JSON/permission/script-inclusion checks passed (STATIC PASS). The manifest still requests only `storage`. No live YouTube or Netflix extension runtime was available for export verification; platform cue acquisition, native selection restoration, Popup interaction, and browser Blob download remain NOT TESTED live.
+
+Remaining risks: YouTube's private `getOption("captions", "track")` snapshot and restoring a null native track may vary by player version. Netflix export depends on current-session parsed/raw cache and its existing private selection/restore APIs. A very long transcript is temporarily held in page memory and returned to the Popup for download.
+
 ### 2026-09-26 — Netflix exact Track IDs made session-only
 
 Problem: The generic storage splitter copied Netflix `primaryTrackId` and `secondaryTrackId` into `subTwinSettings.netflix.tracks`, despite the session-only ID policy and README contract.
@@ -248,6 +266,8 @@ Do not repeat: Do not initialize both adapters/controllers or attach the other p
 
 ## Current Open Issues
 
+- **Final v0.1 live regression remains unrun:** On 2026-09-26 the available browser inventory contained only an empty Codex In-app Browser, with no accessible Chrome extension runtime, YouTube/Netflix playback tabs, authenticated Netflix session, or Chrome storage inspection surface. Do not proceed to packaging based on this audit. Run the live checklist in Chrome and update each item with observed evidence.
+- Markdown subtitle export has static formatter/contract checks, but Popup operation, YouTube cue acquisition/native selection restoration, Netflix cache-first export/native track restoration, and Blob download have not been live tested in Chrome.
 - Netflix cache-first behavior, native track restoration, native-caption no-flash, and episode/fullscreen overlay reattachment need current live regression evidence.
 - YouTube native-caption suppression selector and current SPA routes need live verification beyond the user-reported initial/F5 fix.
 - Popup preview/persistence reopen and reload behavior should be covered in a repeatable release checklist.
@@ -264,6 +284,23 @@ Do not repeat: Do not initialize both adapters/controllers or attach the other p
 | Manifest scope | STATIC PASS | Only `storage` permission; page matches limited to YouTube and Netflix; no cookies/history/debugger/`<all_urls>`. |
 | Settings separation | STATIC PASS | Platform-aware serializer keeps YouTube IDs and omits Netflix IDs; `tests/settings-persistence.js` verifies serialization and legacy-ID restoration filtering. Chrome storage and live Netflix rematching remain unverified. |
 | Renderer security/interaction | STATIC PASS | Overlay uses text nodes/`textContent`, a closed Shadow DOM, and `pointer-events: none`; see entity-decoding cleanup candidate above. |
+
+### Final Live Regression Attempt — 2026-09-26
+
+No live test was run: the only available browser was an empty Codex In-app Browser. There was no accessible Chrome instance with the unpacked extension loaded, no YouTube/Netflix player tab, and no way to inspect `chrome.storage.local`. These are `NOT TESTED`, not `FAIL`. Earlier user-reported live PASS results remain recorded above and are not represented as retested in this attempt.
+
+| Checklist area | Status this attempt | Evidence |
+| --- | --- | --- |
+| YouTube fresh load, tracks, dual cue, overlay | NOT TESTED | No YouTube playback tab or extension runtime available. |
+| YouTube native captions, opacity, preview, persistence | NOT TESTED | No live Popup/player surface available. |
+| YouTube SPA A→B and fullscreen/theater | NOT TESTED | No live YouTube surface available. |
+| Netflix player/tracks/variants/dual cue | NOT TESTED | No Netflix playback tab available. |
+| Netflix cache-first / native flash / track restore / disable restore | NOT TESTED | No authenticated Netflix player or live diagnostics available. |
+| Netflix overlay / opacity / seek / fullscreen / episode change | NOT TESTED | No Netflix playback tab available. |
+| Chrome storage contents and Netflix reload rematch | NOT TESTED | No Chrome DevTools or extension storage inspection surface available. |
+| Cross-platform return to YouTube after Netflix | NOT TESTED | Neither platform was open in a testable browser. |
+
+Static check repeated during this attempt: `node tests/settings-persistence.js` passed. This confirms the pure serializer/restore contract only; it does not validate Chrome storage writes or live rematching.
 
 ### YouTube v0.1 checklist
 

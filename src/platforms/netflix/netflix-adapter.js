@@ -389,6 +389,18 @@
       return this.cues.get(trackId) || [];
     }
 
+    async acquireCuesForExport(trackId) {
+      const cached = this.getCachedCues(trackId);
+      if (cached.length) {
+        this.parsedCueCacheHits++;
+        this.trackSelectionsAvoidedByCache++;
+        return cached;
+      }
+      const result = await this.selectTracks(trackId, null);
+      if (!result.primary.length) throw new Error(result.acquisition.primary.error?.message || `NETFLIX_SUBTITLE_REQUEST_NOT_FOUND: no cues available for ${trackId}.`);
+      return result.primary;
+    }
+
     getDiagnostics() {
       const cueCounts = Object.fromEntries(this.tracks.map((track) => [track.id, this.cues.get(track.id)?.length || 0]));
       const pageTrackMetadata = this.playerDiagnostics.trackMetadata || [];
