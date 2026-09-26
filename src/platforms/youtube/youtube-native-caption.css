@@ -1,0 +1,3 @@
+#movie_player.subtwin-hide-native-caption-text .ytp-caption-window-container {
+  display: none !important;
+}

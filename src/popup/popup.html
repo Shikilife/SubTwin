@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SubTwin</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="popup">
+    <header>
+      <div class="brand-mark" aria-hidden="true">S</div>
+      <div>
+        <h1>SubTwin</h1>
+        <p class="subtitle">Dual Subtitle</p>
+      </div>
+    </header>
+
+    <label class="enable-row" for="enabled">
+      <input id="enabled" type="checkbox">
+      <span>Enable SubTwin</span>
+    </label>
+
+    <label class="field" for="primary">
+      <span>Primary Subtitle</span>
+      <select id="primary" disabled></select>
+    </label>
+
+    <label class="range-field" for="primary-size">
+      <span>Primary Size</span>
+      <span class="range-control"><input id="primary-size" type="range" min="30" max="200" step="5" value="100"><output id="primary-size-value" for="primary-size">100%</output></span>
+    </label>
+
+    <label class="range-field" for="primary-y">
+      <span>Primary Y Position</span>
+      <span class="range-control"><input id="primary-y" type="range" min="0" max="100" step="1" value="72"><output id="primary-y-value" for="primary-y">72%</output></span>
+    </label>
+
+    <label class="field" for="secondary">
+      <span>Secondary Subtitle</span>
+      <select id="secondary" disabled></select>
+    </label>
+
+    <label class="range-field" for="secondary-size">
+      <span>Secondary Size</span>
+      <span class="range-control"><input id="secondary-size" type="range" min="30" max="200" step="5" value="90"><output id="secondary-size-value" for="secondary-size">90%</output></span>
+    </label>
+
+    <label class="range-field" for="secondary-y">
+      <span>Secondary Y Position</span>
+      <span class="range-control"><input id="secondary-y" type="range" min="0" max="100" step="1" value="84"><output id="secondary-y-value" for="secondary-y">84%</output></span>
+    </label>
+
+    <label class="range-field" for="max-width">
+      <span>Max Width</span>
+      <span class="range-control"><input id="max-width" type="range" min="40" max="100" step="1" value="90"><output id="max-width-value" for="max-width">90%</output></span>
+    </label>
+
+    <label class="range-field" for="background-opacity">
+      <span>Background Opacity</span>
+      <span class="range-control"><input id="background-opacity" type="range" min="0" max="100" step="1" value="65"><output id="background-opacity-value" for="background-opacity">65%</output></span>
+    </label>
+
+    <button id="apply" type="button" disabled>Apply</button>
+    <p id="message" class="message" role="status" aria-live="polite">Connecting…</p>
+    <footer id="connection">Player status unavailable</footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

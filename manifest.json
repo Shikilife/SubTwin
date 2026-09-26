@@ -1,0 +1,84 @@
+{
+  "manifest_version": 3,
+  "name": "SubTwin",
+  "version": "0.2.0",
+  "description": "A local-first dual subtitle browser extension for YouTube and Netflix.",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "SubTwin"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/renderer/subtitle-renderer.css"],
+      "matches": ["https://www.youtube.com/*", "https://www.netflix.com/*"]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*", "https://www.netflix.com/*"],
+      "js": ["src/debug/page-debug-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["src/platforms/youtube/page-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.netflix.com/*"],
+      "js": ["src/platforms/netflix/page-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.netflix.com/*"],
+      "css": ["src/platforms/netflix/netflix-native-caption.css"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.netflix.com/*"],
+      "js": ["src/platforms/netflix/netflix-native-caption-controller.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "css": ["src/platforms/youtube/youtube-native-caption.css"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": [
+        "src/core/subtitle-types.js",
+        "src/core/time-sync.js",
+        "src/core/settings.js",
+        "src/core/subtitle-engine.js",
+        "src/debug/console-output.js",
+        "src/renderer/subtitle-renderer.js",
+        "src/platforms/youtube/youtube-native-caption-controller.js",
+        "src/platforms/youtube/youtube-adapter.js",
+        "src/content.js"
+      ],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://www.netflix.com/*"],
+      "js": [
+        "src/core/subtitle-types.js",
+        "src/core/time-sync.js",
+        "src/core/settings.js",
+        "src/core/subtitle-engine.js",
+        "src/debug/console-output.js",
+        "src/renderer/subtitle-renderer.js",
+        "src/platforms/netflix/netflix-adapter.js",
+        "src/content.js"
+      ],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+html.subtwin-netflix-native-caption-suppressed .player-timedtext,
+html.subtwin-netflix-native-caption-suppressed .player-timedtext-text-container,
+html.subtwin-netflix-native-caption-boot .player-timedtext,
+html.subtwin-netflix-native-caption-boot .player-timedtext-text-container {
+  visibility: hidden !important;
+}
