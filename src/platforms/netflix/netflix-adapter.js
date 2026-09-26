@@ -397,7 +397,11 @@
         return cached;
       }
       const result = await this.selectTracks(trackId, null);
-      if (!result.primary.length) throw new Error(result.acquisition.primary.error?.message || `NETFLIX_SUBTITLE_REQUEST_NOT_FOUND: no cues available for ${trackId}.`);
+      if (!result.primary.length) {
+        const detail = result.acquisition.primary.error?.message || `no cues available for ${trackId}.`;
+        const code = /^(?:NETFLIX_SUBTITLE_REQUEST_NOT_FOUND|NO_OBSERVABLE_RESPONSE)/.test(detail) ? "EXPORT_TIMEOUT" : "TRACK_ACQUISITION_FAILED";
+        throw new Error(`${code}: ${detail}`);
+      }
       return result.primary;
     }
 

@@ -17,8 +17,12 @@
           const cues = root.DualSubtitle.types.parseCues(message.body);
           if (!cues.length) return;
           this.responses.set(track.id, cues);
-          const resolve = this.pending.get(track.id);
-          if (resolve) { clearTimeout(resolve.timer); resolve.resolve(cues); this.pending.delete(track.id); }
+          const pending = this.pending.get(track.id);
+          if (pending) {
+            clearTimeout(pending.timer);
+            this.pending.delete(track.id);
+            if (typeof pending.resolve === "function") pending.resolve(cues);
+          }
         } else if (message.type === "nativeTrackSnapshot" || message.type === "nativeTrackRestored") {
           const pending = this.bridgeRequests.get(message.requestId);
           if (!pending) return;
@@ -62,7 +66,7 @@
           this.bridgeRequests.delete(requestId);
           reject(new Error(`PLAYER_NOT_READY: YouTube bridge did not respond to ${type}.`));
         }, 1200);
-        this.bridgeRequests.set(requestId, { resolve, reject, timer });
+        this.bridgeRequests.set(requestId, { resolve, reject, timer, requestId, purpose: type });
       });
       this.post({ type, requestId, ...(track !== undefined ? { track } : {}) });
       return response;
@@ -74,32 +78,50 @@
       const cached = this.getCachedCues(trackId);
       if (cached.length) return cached;
       await this.selectTrack(trackId);
-      return this.getCues(trackId);
+      return this.getCues(trackId, 15000, "export");
     }
-    async getCues(trackId) {
+    async getCues(trackId, timeoutMs = 15000, purpose = "runtime") {
       if (this.responses.has(trackId)) return this.responses.get(trackId);
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => { this.pending.delete(trackId); reject(new Error("TRACK_FETCH_FAILED: no player subtitle response captured for " + trackId)); }, 15000);
-        this.pending.set(trackId, { resolve, timer });
-      });
+      const existing = this.pending.get(trackId);
+      if (existing?.promise) return existing.promise;
+      let resolveCue;
+      let rejectCue;
+      const promise = new Promise((resolve, reject) => { resolveCue = resolve; rejectCue = reject; });
+      const entry = {
+        resolve: resolveCue,
+        reject: rejectCue,
+        timer: null,
+        trackId,
+        purpose,
+        promise
+      };
+      entry.timer = setTimeout(() => {
+        if (this.pending.get(trackId) === entry) this.pending.delete(trackId);
+        const code = purpose === "export" ? "EXPORT_TIMEOUT" : "TRACK_FETCH_FAILED";
+        entry.reject(new Error(`${code}: no player subtitle response captured for ${trackId}.`));
+      }, timeoutMs);
+      this.pending.set(trackId, entry);
+      return promise;
+    }
+
+    settlePendingMap(map, error) {
+      if (!(map instanceof Map)) return;
+      for (const entry of map.values()) {
+        try { if (entry?.timer != null) clearTimeout(entry.timer); } catch (_) {}
+        try { if (typeof entry?.reject === "function") entry.reject(error); } catch (_) {}
+      }
+      try { map.clear(); } catch (_) {}
     }
 
     destroy() {
       if (this.destroyed) return;
       this.destroyed = true;
-      window.removeEventListener("message", this.messageHandler);
-      for (const [trackId, pending] of this.pending) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error("PLAYER_NOT_READY: YouTube adapter was disposed."));
-        this.pending.delete(trackId);
-      }
-      for (const [requestId, pending] of this.bridgeRequests) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error("PLAYER_NOT_READY: YouTube adapter was disposed."));
-        this.bridgeRequests.delete(requestId);
-      }
-      this.tracks = [];
-      this.responses.clear();
+      try { window.removeEventListener("message", this.messageHandler); } catch (_) {}
+      const error = new Error("PLAYER_NOT_READY: YouTube adapter was disposed.");
+      this.settlePendingMap(this.pending, error);
+      this.settlePendingMap(this.bridgeRequests, error);
+      try { this.tracks = []; } catch (_) {}
+      try { this.responses.clear(); } catch (_) {}
     }
   }
   root.DualSubtitle = root.DualSubtitle || {};

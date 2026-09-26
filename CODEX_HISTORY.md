@@ -212,6 +212,20 @@ Validation: `node tests/settings-persistence.js` passed, covering YouTube ID ret
 
 Remaining risk: Confirm real Chrome storage contents and a new Netflix playback session rematching by language plus variant before packaging.
 
+### 2026-09-26 — Markdown export request-lifecycle regression
+
+Symptom: YouTube `routeChanged()` cleanup threw `pending.reject is not a function`; Popup export failures collapsed to the generic “The player did not respond” message on both platforms.
+
+Root cause: YouTube cue waits were stored in `pending` as `{ resolve, timer }`, while `destroy()` unconditionally called `reject()`. These cue waiters were separate from `bridgeRequests` (which already had resolve/reject callbacks), so this was an inconsistent cue-waiter contract, not export requests mixed into one map. The Popup also replaced an empty/missing content-script response with a generic message, hiding whether the failure was a missing receiver or a closed message channel. Source audit confirmed the 900 ms retry is restricted to YouTube `GET_STATUS`/`LIST_TRACKS`; export start returns a job ID immediately and is not awaited inside that short wait.
+
+Fix: Give each YouTube cue waiter a consistent `{ resolve, reject, timer, trackId, purpose, promise }` shape, reuse an existing waiter for the same track, and settle/clear both cue and bridge maps defensively so `destroy()` is idempotent and non-throwing. Keep the maps separate by purpose. The content message listener schedules command dispatch through a Promise before handling errors and returns `true` to keep the async response channel alive. Export remains a content-side job with per-track adapter timeouts (YouTube 15 s, Netflix's existing 4.5 s acquisition timeout), status polling, and no Popup-side hard timeout. Missing message responses now report `PLAYER_NOT_READY` or `MESSAGE_CHANNEL_CLOSED` instead of the generic fallback; track failures retain `EXPORT_TIMEOUT` / `TRACK_ACQUISITION_FAILED` codes. Export acquisition does not call `SubtitleEngine.select()` or change its Primary/Secondary IDs.
+
+Files: `src/platforms/youtube/youtube-adapter.js`, `src/content.js`, `src/popup/popup.js`, `src/platforms/netflix/netflix-adapter.js`, `tests/youtube-adapter-lifecycle.js`, README, and this history.
+
+Validation: Static adapter lifecycle tests cover cue/bridge pending entry shapes, malformed pending cleanup, idempotent `destroy()`, and rejection settlement. Export message start/poll routing and absence of the 900 ms wrapper were source-audited. Live YouTube SPA/export, Netflix export/native restore, and browser download remain NOT TESTED in this environment.
+
+Do not repeat: Long-running export jobs must not reuse short popup/status timeouts. Adapter pending request maps must have a consistent entry contract and remain separated by purpose.
+
 ## Known Regressions / Lessons
 
 ### YouTube first-entry initialization

@@ -24,6 +24,7 @@
   let isNetflix = false;
   let previewFrame = 0;
   let activeExportJobId = null;
+  let readyExportStatus = null;
   let exportPollTimer = null;
   const ranges = [primarySize, secondarySize, primaryY, secondaryY, maxWidth, backgroundOpacity];
   for (const range of ranges) range.disabled = true;
@@ -45,8 +46,16 @@
 
   async function send(type, data = {}) {
     if (tabId == null) throw new Error("No active browser tab.");
-    const response = await chrome.tabs.sendMessage(tabId, { namespace: "SUBTWIN_POPUP", type, ...data });
-    if (!response?.ok) throw new Error(response?.error || "The player did not respond.");
+    let response;
+    try {
+      response = await chrome.tabs.sendMessage(tabId, { namespace: "SUBTWIN_POPUP", type, ...data });
+    } catch (error) {
+      const detail = String(error?.message || error || "No response");
+      const code = /Receiving end does not exist|Could not establish connection/i.test(detail) ? "PLAYER_NOT_READY" : "MESSAGE_CHANNEL_CLOSED";
+      throw new Error(`${code}: ${detail}`);
+    }
+    if (!response) throw new Error("MESSAGE_CHANNEL_CLOSED: content script returned no response.");
+    if (response.ok !== true) throw new Error(response.error || "MESSAGE_CHANNEL_CLOSED: content script did not complete the request.");
     return response.result;
   }
 
@@ -156,6 +165,7 @@
   function showExportStatus(status) {
     if (!status) return;
     activeExportJobId = status.state === "preparing" ? status.id : null;
+    readyExportStatus = status.state === "complete" && status.markdown ? status : null;
     downloadExport.hidden = status.state !== "complete" || !status.markdown;
     if (status.state === "preparing") {
       exportStatus.textContent = `Preparing subtitles… ${status.completed}/${status.total}`;
@@ -183,6 +193,7 @@
   async function pollExport(jobId) {
     try {
       const status = await send("GET_EXPORT_STATUS", { jobId });
+      if (!status) throw new Error("PLAYER_NOT_READY: export job is no longer available for this playback session.");
       showExportStatus(status);
     } catch (error) {
       exportStatus.textContent = error.message || "Export status is unavailable.";
@@ -341,9 +352,9 @@
     }
   });
 
-  downloadExport.addEventListener("click", async () => {
+  downloadExport.addEventListener("click", () => {
     try {
-      const status = await send("GET_EXPORT_STATUS", { jobId: activeExportJobId || undefined });
+      const status = readyExportStatus;
       if (!status?.markdown) throw new Error("The prepared Markdown export is no longer available.");
       downloadMarkdown(status);
       const succeeded = status.exportedTrackLabels?.length || 0;

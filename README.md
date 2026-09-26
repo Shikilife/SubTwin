@@ -74,6 +74,7 @@ tests/
 ├─ subtitle-parser.html
 ├─ subtitle-parser.js
 ├─ subtitle-exporter.js
+├─ youtube-adapter-lifecycle.js
 └─ settings-persistence.js
 ```
 
@@ -136,6 +137,8 @@ The previous YouTube PoC's dual-cue acquisition was reported as PASS in the user
 Run `node tests/settings-persistence.js` to check the platform-specific storage contract: YouTube exact track IDs are retained, Netflix exact IDs are omitted, Netflix language/variant preferences are retained, and legacy Netflix IDs are ignored during restoration. This does not exercise Chrome `storage.local` or live Netflix rematching.
 
 Run `node tests/subtitle-exporter.js` to check single/multiple track sections, multiline and CC text preservation, empty cue filtering, timestamp formatting, and filename sanitization. `node --check src/content.js`, `node --check src/popup/popup.js`, `node --check src/export/subtitle-exporter.js`, and Manifest JSON/permission checks provide static validation only; they do not replace a live browser export.
+
+Run `node tests/youtube-adapter-lifecycle.js` to check cue/bridge pending-entry contracts, cleanup settlement, and idempotent adapter disposal. It does not replace a YouTube SPA live test.
 
 Netflix uses a MAIN-world bridge injected at `document_start` to probe the current player session and its timed-text track metadata. It observes page `fetch`/XHR subtitle responses and keeps matching response bodies in a bounded, in-memory, session-scoped cache (8 MiB, 64 entries, up to 12 per track). No subtitle text is written to storage or sent off-device. The isolated adapter can query this cache after it initializes, so a response captured before adapter startup is not lost. Request attribution snapshots the native selected track at request time, or the SubTwin-requested track for an internal acquisition. On a session change the raw-response cache and parsed cue cache are cleared.
 

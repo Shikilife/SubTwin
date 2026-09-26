@@ -293,6 +293,7 @@
       filename: null
     };
     const job = exportJob;
+    console.info(`[SubTwin][Export] job started; tracks=${selected.length}`);
     void runExport(job, adapter, selected);
     return { jobId: job.id, state: job.state, total: job.total };
   }
@@ -315,6 +316,8 @@
         if (engine?.adapter !== adapter) throw new Error("PLAYER_NOT_READY: playback changed during export.");
         try {
           let cues = getCachedTrackCues(adapter, track.id);
+          console.info(`[SubTwin][Export] track start id=${track.id}; language=${track.language || "unknown"}`);
+          if (cues.length) console.info(`[SubTwin][Export] cache hit id=${track.id}; cues=${cues.length}`);
           if (!cues.length) {
             if (typeof adapter.acquireCuesForExport !== "function") throw new Error("TRACK_FETCH_FAILED: this platform adapter cannot acquire a complete cue list.");
             cues = await adapter.acquireCuesForExport(track.id);
@@ -324,8 +327,12 @@
           engine?.cues.set(track.id, cues);
           exportedTracks.push({ id: track.id, language: track.language, label: track.label, cues });
           job.exportedTrackLabels.push(track.label || track.language || track.id);
+          console.info(`[SubTwin][Export] track acquired id=${track.id}; cues=${cues.length}`);
         } catch (error) {
-          job.failedTracks.push({ id: track.id, label: track.label || track.language || track.id, error: String(error?.message || error) });
+          const reason = String(error?.message || error);
+          const code = /^(\w+):/.exec(reason)?.[1] || "TRACK_ACQUISITION_FAILED";
+          job.failedTracks.push({ id: track.id, label: track.label || track.language || track.id, code, error: reason });
+          console.warn(`[SubTwin][Export] track failed id=${track.id}; code=${code}`);
         }
         job.completed++;
       }
@@ -334,6 +341,7 @@
         job.markdown = DualSubtitle.subtitleExporter.createMarkdown({ title, tracks: exportedTracks, failedTracks: job.failedTracks });
         job.filename = DualSubtitle.subtitleExporter.sanitizeFilename(title);
         job.state = "complete";
+        console.info(`[SubTwin][Export] markdown ready; exported=${exportedTracks.length}; failed=${job.failedTracks.length}`);
       } else {
         job.state = "failed";
       }
@@ -414,7 +422,7 @@
     if (sender.id !== chrome.runtime.id || message?.namespace !== "SUBTWIN_POPUP" || typeof message.type !== "string") return false;
     const allowed = new Set(["GET_STATUS", "LIST_TRACKS", "SELECT_TRACKS", "ENABLE", "DISABLE", "PREVIEW_SETTINGS", "SAVE_SETTINGS", "UPDATE_SETTINGS", "EXPORT_SUBTITLES", "GET_EXPORT_STATUS"]);
     if (!allowed.has(message.type)) return false;
-    Promise.resolve(handlePopupCommand(message)).then(
+    Promise.resolve().then(() => handlePopupCommand(message)).then(
       (result) => sendResponse({ ok: true, result }),
       (error) => sendResponse({ ok: false, error: String(error?.message || error) })
     );
